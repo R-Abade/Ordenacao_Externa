@@ -1,156 +1,194 @@
-// Source code is decompiled from a .class file using FernFlower decompiler.
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
+
+import java.io.*;
 import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.PriorityQueue;
+import java.util.*;
 
 public class IntercaladorBalanceado {
-   private static final DecimalFormat FORMATADOR = new DecimalFormat("0.####################");
-   private static final int LIMITE_MEMORIA = 100;
-   private static final int NUMERO_CAMINHOS = 10;
 
-   public IntercaladorBalanceado() {
-   }
+    private static final DecimalFormat FORMATADOR = new DecimalFormat("0.####################");
+    private static final int LIMITE_MEMORIA = 100;
+    private static final int NUMERO_CAMINHOS = 10;
+    private static final int BUFFER_SIZE = 8192;
 
-   public void ordenarArquivo(File arquivoEntrada) throws IOException {
-      LinkedList<File> blocosTemp = new LinkedList<>();
+    public void ordenarArquivo(File arquivoEntrada) throws IOException {
+        System.out.println("Iniciando ordenação do arquivo: " + arquivoEntrada.getAbsolutePath());
 
-      try (BufferedReader leitor = new BufferedReader(new FileReader(arquivoEntrada))) {
-         List<Double> bufferMemoria = new ArrayList<>(LIMITE_MEMORIA);
-         String linha;
+        if (!arquivoEntrada.exists()) {
+            throw new FileNotFoundException("Arquivo de entrada não encontrado: " + arquivoEntrada.getAbsolutePath());
+        }
 
-         while ((linha = leitor.readLine()) != null) {
-            double numero = Double.parseDouble(linha.trim().replace(",", "."));
-            bufferMemoria.add(numero);
+        LinkedList<File> blocosTemp = new LinkedList<>();
+        int totalNumeros = 0;
 
-            if (bufferMemoria.size() >= LIMITE_MEMORIA) {
-               processarBlocoMemoria(bufferMemoria, blocosTemp);
-               bufferMemoria.clear();
+        // Read and create initial sorted blocks
+        try (BufferedReader leitor = new BufferedReader(new FileReader(arquivoEntrada), BUFFER_SIZE)) {
+            double[] bufferMemoria = new double[LIMITE_MEMORIA];
+            int count = 0;
+            String linha;
+
+            while ((linha = leitor.readLine()) != null) {
+                try {
+                    bufferMemoria[count] = Double.parseDouble(linha.trim().replace(",", "."));
+                    count++;
+                    totalNumeros++;
+
+                    if (count >= LIMITE_MEMORIA) {
+                        System.out.println("Processando bloco de " + count + " números");
+                        processarBlocoMemoria(bufferMemoria, count, blocosTemp);
+                        count = 0;
+                    }
+                } catch (NumberFormatException e) {
+                    System.err.println("Número inválido ignorado: " + linha);
+                }
             }
-         }
 
-         if (!bufferMemoria.isEmpty()) {
-            processarBlocoMemoria(bufferMemoria, blocosTemp);
-         }
-      }
-
-      executarOrdenacaoExterna(blocosTemp);
-   }
-
-   private void processarBlocoMemoria(List<Double> numeros, LinkedList<File> listaBlocos) throws IOException {
-      Collections.sort(numeros);
-      File blocoTemp = File.createTempFile("ordExt_bloco", ".txt");
-      
-      try (BufferedWriter escritor = new BufferedWriter(new FileWriter(blocoTemp))) {
-         for (Double numero : numeros) {
-            escritor.write(FORMATADOR.format(numero));
-            escritor.newLine();
-         }
-      }
-      listaBlocos.add(blocoTemp);
-   }
-
-   private void executarOrdenacaoExterna(LinkedList<File> blocos) throws IOException {
-      while (blocos.size() > 1) {
-         LinkedList<File> novosBlocos = new LinkedList<>();
-         List<List<File>> grupos = dividirGrupos(blocos, NUMERO_CAMINHOS);
-
-         for (List<File> grupo : grupos) {
-            File blocoMergeado = mergearGrupo(grupo);
-            novosBlocos.add(blocoMergeado);
-         }
-
-         // Limpeza dos arquivos temporários antigos
-         for (File arquivo : blocos) {
-            arquivo.delete();
-         }
-
-         blocos = novosBlocos;
-      }
-
-      // Renomeia o arquivo final
-      File resultadoFinal = new File("ordExt_resultado.txt");
-      if (!blocos.isEmpty()) {
-         blocos.getFirst().renameTo(resultadoFinal);
-      }
-   }
-
-   private List<List<File>> dividirGrupos(List<File> arquivos, int tamanhoGrupo) {
-      List<List<File>> grupos = new ArrayList<>();
-      
-      for (int i = 0; i < arquivos.size(); i += tamanhoGrupo) {
-         int fim = Math.min(i + tamanhoGrupo, arquivos.size());
-         grupos.add(new ArrayList<>(arquivos.subList(i, fim)));
-      }
-      return grupos;
-   }
-
-   private File mergearGrupo(List<File> grupoArquivos) throws IOException {
-      PriorityQueue<ElementoHeap> heap = new PriorityQueue<>(Comparator.comparingDouble(e -> e.valor));
-      List<BufferedReader> leitores = new ArrayList<>();
-
-      try {
-         File arquivoMergeado = File.createTempFile("ordExt_merge", ".txt");
-         
-         // Inicializa heap com primeiros elementos de cada arquivo
-         for (File arquivo : grupoArquivos) {
-            BufferedReader leitor = new BufferedReader(new FileReader(arquivo));
-            leitores.add(leitor);
-            String linha = leitor.readLine();
-            
-            if (linha != null) {
-               double valor = Double.parseDouble(linha.trim().replace(",", "."));
-               heap.add(new ElementoHeap(leitor, valor));
+            if (count > 0) {
+                System.out.println("Processando bloco final de " + count + " números");
+                processarBlocoMemoria(bufferMemoria, count, blocosTemp);
             }
-         }
+        }
 
-         // Processa elementos usando heap
-         try (BufferedWriter escritor = new BufferedWriter(new FileWriter(arquivoMergeado))) {
+        System.out.println("Total de números lidos: " + totalNumeros);
+        System.out.println("Total de blocos temporários criados: " + blocosTemp.size());
+
+        if (blocosTemp.isEmpty()) {
+            System.out.println("Nenhum bloco temporário foi criado. O arquivo de entrada está vazio?");
+            return;
+        }
+
+        // Perform external sorting
+        File arquivoFinal = executarOrdenacaoExterna(blocosTemp);
+
+        if (arquivoFinal != null) {
+            File resultadoFinal = new File("ordExt_resultado.txt");
+            if (resultadoFinal.exists()) {
+                System.out.println("Removendo arquivo de resultado anterior");
+                resultadoFinal.delete();
+            }
+
+            // Use copy instead of rename to handle cross-filesystem moves
+            System.out.println("Copiando resultado final para: " + resultadoFinal.getAbsolutePath());
+            copyFile(arquivoFinal, resultadoFinal);
+            arquivoFinal.delete();
+
+            System.out.println("Arquivo final criado com sucesso: " + resultadoFinal.getAbsolutePath());
+        } else {
+            throw new IOException("Falha ao gerar arquivo final");
+        }
+    }
+
+    private void processarBlocoMemoria(double[] numeros, int count, LinkedList<File> listaBlocos) throws IOException {
+        PriorityQueue<Double> heap = new PriorityQueue<>();
+        for (int i = 0; i < count; i++) {
+            heap.offer(numeros[i]);
+        }
+
+        File blocoTemp = File.createTempFile("ordExt_bloco", ".txt");
+        System.out.println("Criando bloco temporário: " + blocoTemp.getAbsolutePath());
+
+        try (BufferedWriter escritor = new BufferedWriter(new FileWriter(blocoTemp), BUFFER_SIZE)) {
             while (!heap.isEmpty()) {
-               ElementoHeap elemento = heap.poll();
-               escritor.write(FORMATADOR.format(elemento.valor));
-               escritor.newLine();
-
-               String proximaLinha = elemento.leitor.readLine();
-               if (proximaLinha != null) {
-                  double novoValor = Double.parseDouble(proximaLinha.trim().replace(",", "."));
-                  heap.add(new ElementoHeap(elemento.leitor, novoValor));
-               }
+                escritor.write(FORMATADOR.format(heap.poll()));
+                escritor.newLine();
             }
-         }
+        }
+        listaBlocos.add(blocoTemp);
+    }
 
-         // Fecha leitores e remove arquivos temporários
-         for (BufferedReader leitor : leitores) {
-            leitor.close();
-         }
-         for (File arquivo : grupoArquivos) {
-            arquivo.delete();
-         }
+    private File executarOrdenacaoExterna(LinkedList<File> blocos) throws IOException {
+        System.out.println("Iniciando ordenação externa com " + blocos.size() + " blocos");
 
-         return arquivoMergeado;
+        while (blocos.size() > 1) {
+            LinkedList<File> novosBlocos = new LinkedList<>();
 
-      } catch (IOException e) {
-         throw new IOException("Falha no merge: " + e.getMessage(), e);
-      }
-   }
+            for (int i = 0; i < blocos.size(); i += NUMERO_CAMINHOS) {
+                int fim = Math.min(i + NUMERO_CAMINHOS, blocos.size());
+                List<File> grupo = new ArrayList<>(blocos.subList(i, fim));
+                System.out.println("Mergeando grupo de " + grupo.size() + " arquivos");
+                File blocoMergeado = mergearGrupo(grupo);
+                novosBlocos.add(blocoMergeado);
+            }
 
-   // Classe auxiliar para o heap
-   private static class ElementoHeap {
-      final BufferedReader leitor;
-      final double valor;
+            for (File arquivo : blocos) {
+                arquivo.delete();
+            }
 
-      ElementoHeap(BufferedReader leitor, double valor) {
-         this.leitor = leitor;
-         this.valor = valor;
-      }
-   }
+            blocos = novosBlocos;
+            System.out.println("Restam " + blocos.size() + " blocos após merge");
+        }
+
+        return blocos.isEmpty() ? null : blocos.getFirst();
+    }
+
+    private File mergearGrupo(List<File> grupoArquivos) throws IOException {
+        PriorityQueue<ElementoHeap> heap = new PriorityQueue<>();
+        List<BufferedReader> leitores = new ArrayList<>();
+        File arquivoMergeado = File.createTempFile("ordExt_merge", ".txt");
+
+        System.out.println("Criando arquivo mergeado: " + arquivoMergeado.getAbsolutePath());
+
+        try {
+            // Initialize readers and heap
+            for (File arquivo : grupoArquivos) {
+                BufferedReader leitor = new BufferedReader(new FileReader(arquivo), BUFFER_SIZE);
+                leitores.add(leitor);
+                String linha = leitor.readLine();
+                if (linha != null) {
+                    double valor = Double.parseDouble(linha.trim().replace(",", "."));
+                    heap.offer(new ElementoHeap(leitor, valor));
+                }
+            }
+
+            try (BufferedWriter escritor = new BufferedWriter(new FileWriter(arquivoMergeado), BUFFER_SIZE)) {
+                while (!heap.isEmpty()) {
+                    ElementoHeap elemento = heap.poll();
+                    escritor.write(FORMATADOR.format(elemento.valor));
+                    escritor.newLine();
+
+                    String proximaLinha = elemento.leitor.readLine();
+                    if (proximaLinha != null) {
+                        double novoValor = Double.parseDouble(proximaLinha.trim().replace(",", "."));
+                        heap.offer(new ElementoHeap(elemento.leitor, novoValor));
+                    }
+                }
+            }
+        } finally {
+            for (BufferedReader leitor : leitores) {
+                try {
+                    leitor.close();
+                } catch (IOException e) {
+                    System.err.println("Erro ao fechar leitor: " + e.getMessage());
+                }
+            }
+        }
+
+        return arquivoMergeado;
+    }
+
+    // Helper method to copy files
+    private void copyFile(File source, File dest) throws IOException {
+        try (InputStream in = new BufferedInputStream(new FileInputStream(source)); OutputStream out = new BufferedOutputStream(new FileOutputStream(dest))) {
+            byte[] buffer = new byte[BUFFER_SIZE];
+            int length;
+            while ((length = in.read(buffer)) > 0) {
+                out.write(buffer, 0, length);
+            }
+        }
+    }
+
+    private static class ElementoHeap implements Comparable<ElementoHeap> {
+
+        final BufferedReader leitor;
+        final double valor;
+
+        ElementoHeap(BufferedReader leitor, double valor) {
+            this.leitor = leitor;
+            this.valor = valor;
+        }
+
+        @Override
+        public int compareTo(ElementoHeap outro) {
+            return Double.compare(this.valor, outro.valor);
+        }
+    }
 }
