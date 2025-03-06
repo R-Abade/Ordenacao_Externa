@@ -1,92 +1,141 @@
-
 import java.io.*;
 import java.text.DecimalFormat;
 import java.util.*;
 
-class Element {
-
-    BufferedReader reader; // The BufferedReader for the file
-    double value; // The current value read from the BufferedReader
-
-    // Constructor
-    public Element(BufferedReader reader, double value) {
-        this.reader = reader;
-        this.value = value;
-    }
-}
-
 public class Inter_Bal {
 
+    private static final int tamanhoBuffer = 8194; //quanto maior o buffer, mais eficiente fica - by Novy
+    private static final int CAMINHOS = 10;
+    private static final int MEMORIA_PRIMARIA = 100;
+
     public void intercalador(File arquivo) throws IOException {
-        LinkedList<File> mem = new LinkedList<>(); // List to hold temporary files
-        double arr[] = new double[100];
+        LinkedList<File> arquivosTemps = new LinkedList<>();
+        double[] mem = new double[MEMORIA_PRIMARIA];
         int i = 0;
 
-        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+        try (BufferedReader leitor = new BufferedReader(new FileReader(arquivo), tamanhoBuffer)) {
             String linha;
-            while ((linha = reader.readLine()) != null) {
+            while ((linha = leitor.readLine()) != null) {
                 double registro = Double.parseDouble(linha);
-                arr[i] = registro;
+                mem[i] = registro;
+                i++;
 
-                if (i == 99) {
-                    PriorityQueue<Double> heap = new PriorityQueue<>(100);
-                    for (double d : arr) {
-                        heap.add(d);
-                    }
-
-                    File temp = File.createTempFile("ordExt_resposta", ".txt");
-                    try (BufferedWriter saida = new BufferedWriter(new FileWriter(temp))) {
-                        while (!heap.isEmpty()) {
-                            saida.write(heap.poll() + "\n");
-                        }
-                        mem.add(temp);
-                    }
+                if (i == MEMORIA_PRIMARIA) {
+                    arquivoTemp(arquivosTemps, mem, i);
                     i = 0;
                 }
-                i++;
             }
 
-        } catch (Exception e) {
-            System.out.println("Erro: " + e.getMessage());
+            if (i > 0) {
+                arquivoTemp(arquivosTemps, mem, i);
+            }
         }
-        ordExterno(mem);
+
+        File resposta = intercaladorArquivos(arquivosTemps);
+        File resultado = new File("ordExt_resultado.txt");
+
+        if (resposta != null) {
+            try (BufferedReader leitor = new BufferedReader(new FileReader(resposta), tamanhoBuffer); BufferedWriter escritor = new BufferedWriter(new FileWriter(resultado), tamanhoBuffer)) {
+
+                DecimalFormat FORMATADOR = new DecimalFormat("0.####################");
+                String linha = leitor.readLine();
+                while (linha != null) {
+                    double registro = Double.parseDouble(linha);
+                    String registrado = FORMATADOR.format(registro);
+                    escritor.write(registrado);
+                    escritor.newLine();
+                    linha = leitor.readLine();
+                }
+            }
+
+            resposta.delete();
+            System.out.println("Resultado: " + resultado.getAbsolutePath());
+        }
     }
 
-    public void ordExterno(LinkedList<File> mem) throws IOException {
-        List<BufferedReader> caminhos = new ArrayList<>();
-        PriorityQueue<Element> minHeap = new PriorityQueue<>(Comparator.comparingDouble(e -> e.value));
-        DecimalFormat df = new DecimalFormat("#.################"); // Format for double values
+    public void arquivoTemp(LinkedList<File> arquivosTemps, double[] registros, int tamanhoMem) throws IOException {
+        PriorityQueue<Double> heap = new PriorityQueue<>();
+        for (int i = 0; i < tamanhoMem; i++) {
+            heap.add(registros[i]);
+        }
 
-        try {
+        File temp = File.createTempFile("ordExt_temp", ".txt");
+        try (BufferedWriter escritor = new BufferedWriter(new FileWriter(temp), tamanhoBuffer)) {
+            while (heap.isEmpty() != true) {
+                escritor.write(String.valueOf(heap.poll()));
+                escritor.newLine();
+            }
+        }
 
-            for (File file : mem) {
-                BufferedReader leitor = new BufferedReader(new FileReader(file));
-                caminhos.add(leitor);
+        arquivosTemps.add(temp);
+    }
+
+    public File intercaladorArquivos(LinkedList<File> memoria) throws IOException {
+        while (memoria.size() > 1) {
+            LinkedList<File> mergedFiles = new LinkedList<>();
+
+            for (int i = 0; i < memoria.size(); i += CAMINHOS) {
+                int fim = Math.min(i + CAMINHOS, memoria.size());
+                LinkedList<File> blocoMerges = new LinkedList<>(memoria.subList(i, fim));
+                File tempMergeado = mergeador(blocoMerges);
+                mergedFiles.add(tempMergeado);
+
+                for (File file : blocoMerges) {
+                    file.delete();
+                }
+            }
+
+            memoria = mergedFiles;
+        }
+
+        if (memoria.isEmpty()) {
+            return null;
+        } else {
+            return memoria.getFirst();
+        }
+    }
+
+    public File mergeador(List<File> caminhos) throws IOException {
+        PriorityQueue<ElementoHeap> heap = new PriorityQueue<>();
+        LinkedList<BufferedReader> buffer = new LinkedList<>();
+        File mergeFile = File.createTempFile("ordExt_intercalado", ".txt");
+       // System.out.println("Criando arquivo mergeado: " + mergeFile.getAbsolutePath());
+
+        try (BufferedWriter escritor = new BufferedWriter(new FileWriter(mergeFile), tamanhoBuffer)) {
+            for (File file : caminhos) {
+                BufferedReader leitor = new BufferedReader(new FileReader(file), tamanhoBuffer);
+                buffer.add(leitor);
                 String linha = leitor.readLine();
                 if (linha != null) {
                     double registro = Double.parseDouble(linha);
-                    minHeap.add(new Element(leitor, registro));
+                    heap.add(new ElementoHeap(leitor, registro));
                 }
             }
 
-            try (BufferedWriter resposta = new BufferedWriter(new FileWriter("ordExt_resultado.txt"))) {
-                while (!minHeap.isEmpty()) {
-                    Element elem = minHeap.poll();
-                    resposta.write(df.format(elem.value) + "\n");
+            while (heap.isEmpty() != true) {
+                ElementoHeap elem = heap.poll();
+                escritor.write(String.valueOf(elem.valor));
+                escritor.newLine();
 
-                    String linha = elem.reader.readLine();
-                    if (linha != null) {
-                        double registro = Double.parseDouble(linha);
-                        minHeap.add(new Element(elem.reader, registro));
-                    }
+                String nextLine = elem.leitor.readLine();
+                if (nextLine != null) {
+                    double valor = Double.parseDouble(nextLine);
+                    heap.add(new ElementoHeap(elem.leitor, valor));
                 }
             }
-        } catch (Exception e) {
-            System.out.println("Erro");
         } finally {
-            for (BufferedReader arquivo : caminhos) {
-                arquivo.close();
+            for (BufferedReader temp : buffer) {
+                try {
+                    temp.close();
+                } catch (Exception e) {
+                    System.out.println("Erro ao fechar leitor: " + e.getMessage());
+                }
+            }
+            for (File file : caminhos) {
+                file.delete();
             }
         }
+
+        return mergeFile;
     }
 }
