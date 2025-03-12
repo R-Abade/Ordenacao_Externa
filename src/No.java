@@ -3,7 +3,7 @@
  * Julio Macumoto             RA: 344915
  * Wagner Takeshi Obara       RA: 317365
  */
-package arvore;
+
 
 import java.util.ArrayList;
 
@@ -21,11 +21,11 @@ public class No {
 
     public No(int n) {
         this.chave = new ArrayList<Double>(n - 1);
-        for (double i = 0; i < n - 1; i++) {
+        for (int i = 0; i < n - 1; i++) {
             this.chave.add(null);
         }
         this.filho = new ArrayList<No>(n);
-        for (double i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
             this.filho.add(null);
         }
         this.folha = true;
